@@ -29,6 +29,21 @@ class Block(nn.Module):
         return out + (x if self.shortcut is None else self.shortcut(x))
 
 
+@torch.no_grad()
+def recompute_bn_stats(model: nn.Module, images: torch.Tensor, batch_size: int = 256) -> None:
+    """Resets BatchNorm running stats and re-estimates them (cumulative average) from uint8 NCHW images."""
+    bns = [m for m in model.modules() if isinstance(m, nn.BatchNorm2d)]
+    momenta = [m.momentum for m in bns]
+    for m in bns:
+        m.reset_running_stats()
+        m.momentum = None
+    model.train()
+    for i in range(0, len(images), batch_size):
+        model(images[i:i + batch_size].float() / 255)
+    for m, momentum in zip(bns, momenta):
+        m.momentum = momentum
+
+
 class WideResNet(nn.Module):
     """Takes float images in [0, 1], NCHW; normalization happens inside."""
 

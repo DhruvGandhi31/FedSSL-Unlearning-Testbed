@@ -64,13 +64,14 @@ def dirichlet_partition(idx: np.ndarray, labels: np.ndarray, n: int, alpha: floa
     raise RuntimeError(f"no Dirichlet draw gave every client >= {min_size} examples; lower min_client_size")
 
 
-def split_labeled(idx: np.ndarray, labels: np.ndarray, frac: float,
-                  rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """Stratified by class: keeps round(frac * n_c) of each class labeled."""
+def split_labeled(idx: np.ndarray, labels: np.ndarray, frac: float, rng: np.random.Generator,
+                  class_frac: dict[int, float] | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Stratified by class: keeps round(frac * n_c) of each class labeled (class_frac overrides per class)."""
     lab = [np.empty(0, dtype=np.int64)]
     for c in np.unique(labels[idx]):
         ci = rng.permutation(idx[labels[idx] == c])
-        lab.append(ci[: int(round(frac * len(ci)))])
+        f = (class_frac or {}).get(int(c), frac)
+        lab.append(ci[: int(round(f * len(ci)))])
     labeled = np.sort(np.concatenate(lab))
     return labeled, np.setdiff1d(idx, labeled)
 
@@ -87,9 +88,10 @@ def make_clients(labels: np.ndarray, cfg: DataConfig) -> list[ClientData]:
         return [ClientData(i, *split_labeled(p, labels, cfg.labeled_frac, rng)) for i, p in enumerate(parts)]
 
     if cfg.scenario == "exclusive_class":
-        # Client 0 gets forget_share of class k (its usual labeled fraction of it is labeled).
+        # Client 0 gets forget_share of class k, forget_labeled_frac of it labeled.
         # The rest of class k is spread over clients 1..N-1 as unlabeled data only.
         k = cfg.forget_class
+        k_frac = cfg.labeled_frac if cfg.forget_labeled_frac < 0 else cfg.forget_labeled_frac
         is_k = labels[pool] == k
         k_idx = rng.permutation(pool[is_k])
         n0 = int(round(cfg.forget_share * len(k_idx)))
@@ -98,7 +100,8 @@ def make_clients(labels: np.ndarray, cfg: DataConfig) -> list[ClientData]:
         clients = []
         for i, p in enumerate(parts):
             if i == 0:
-                lab, unl = split_labeled(np.concatenate([p, k_idx[:n0]]), labels, cfg.labeled_frac, rng)
+                lab, unl = split_labeled(np.concatenate([p, k_idx[:n0]]), labels, cfg.labeled_frac, rng,
+                                         class_frac={k: k_frac})
             else:
                 lab, unl = split_labeled(p, labels, cfg.labeled_frac, rng)
                 unl = np.sort(np.concatenate([unl, k_rest[i - 1]]))

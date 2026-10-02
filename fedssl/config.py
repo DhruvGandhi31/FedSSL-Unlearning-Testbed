@@ -21,6 +21,7 @@ class DataConfig:
     scenario: str = "exclusive_class"  # "none" | "exclusive_class"
     forget_class: int = 0              # class k for exclusive_class
     forget_share: float = 0.2          # fraction of class-k train images given to client 0
+    forget_labeled_frac: float = -1.0  # fraction of client 0's class-k images labeled; <0 = labeled_frac
 
 
 @dataclass
@@ -51,9 +52,12 @@ class FedConfig:
 class UnlearnConfig:
     forget_client: int = 0
     federaser_calib_ratio: float = 0.5  # calibration local steps = ratio * train.local_steps
-    pga_lr: float = 0.01
+    federaser_bn_samples: int = 5000    # images from each step's participants used to re-estimate BN stats
+    pga_lr: float = 1e-4                # one step at 1e-2 already collapses WRN-28-2 (test acc 0.55 -> 0.13)
     pga_steps: int = 200                # max ascent steps
-    pga_stop_acc: float = 0.1           # stop once accuracy on the forget client's labeled data <= this
+    pga_stop: str = "matched"           # "matched": forget-client acc <= the reference model's test acc
+                                        #   reweighted to the forget client's class mix
+                                        # "chance": forget-client acc <= 1 / num_classes
     pga_radius_frac: float = 0.33       # L2 ball radius = frac * mean distance(reference, random inits)
     pga_recovery_rounds: int = 5        # FedAvg rounds without the forget client after ascent
     pga_recovery_lr: float = 0.01

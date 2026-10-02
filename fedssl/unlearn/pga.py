@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from fedssl.config import Config
-from fedssl.data import ClientData, DeviceData
+from fedssl.data import NUM_CLASSES, ClientData, DeviceData
 from fedssl.metrics import MetricsWriter, accuracy_on, evaluate
 from fedssl.models import WideResNet
 from fedssl.server import GLOBAL, fedavg, without_client
@@ -58,25 +58,34 @@ def pga(cfg: Config, data: DeviceData, clients: list[ClientData], schedule: list
     model.eval()
     opt = torch.optim.SGD(model.parameters(), lr=u.pga_lr)
     lab = torch.as_tensor(clients[u.forget_client].labeled, device=device)
-    acc = accuracy_on(model, data, lab)
-    log.write({"pga_step": 0, "radius": radius, "forget_client_acc": acc, "eval": evaluate(model, data)})
-    for step in range(1, u.pga_steps + 1):
+    mix = torch.bincount(data.y_train[lab], minlength=NUM_CLASSES).float() / len(lab)
+
+    acc, ev = accuracy_on(model, data, lab), evaluate(model, data)
+    # target fixed at the reference model: computed per step it falls as ascent damages the model
+    if u.pga_stop == "matched":
+        target = (mix * torch.tensor(ev["class_acc"], device=device)).sum().item()
+    elif u.pga_stop == "chance":
+        target = 1 / NUM_CLASSES
+    else:
+        raise ValueError(f"unknown pga_stop {u.pga_stop!r}")
+    log.write({"pga_step": 0, "radius": radius, "forget_client_acc": acc, "stop_target": target, "eval": ev})
+    step = 0
+    while acc > target and step < u.pga_steps:
+        step += 1
         idx = lab[torch.randint(len(lab), (cfg.train.batch_size,), device=device)]
         loss = -F.cross_entropy(model(weak_augment(data.x_train[idx].float() / 255)), data.y_train[idx])
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
         dist = project_(list(model.parameters()), ref, radius)
-        if step % 10 == 0 or step == u.pga_steps:
-            acc = accuracy_on(model, data, lab)
-            log.write({"pga_step": step, "loss": -loss.item(), "dist": dist, "forget_client_acc": acc})
-            if acc <= u.pga_stop_acc:
-                break
-    ev = evaluate(model, data)
-    log.write({"pga_step": step, "forget_client_acc": acc, "eval": ev})
+        acc = accuracy_on(model, data, lab)
+        if step % 10 == 0 or acc <= target or step == u.pga_steps:
+            ev = evaluate(model, data)
+            log.write({"pga_step": step, "loss": -loss.item(), "dist": dist, "forget_client_acc": acc,
+                       "stop_target": target, "eval": ev})
     k = cfg.data.forget_class
-    print(f"ascent stopped at step {step}: forget-client acc {acc:.3f}  test_acc {ev['test_acc']:.4f}  "
-          f"class{k}_acc {ev['class_acc'][k]:.4f}", flush=True)
+    print(f"ascent stopped at step {step}: forget-client acc {acc:.3f} (target {target:.3f})  "
+          f"test_acc {ev['test_acc']:.4f}  class{k}_acc {ev['class_acc'][k]:.4f}", flush=True)
 
     rec = copy.deepcopy(cfg)
     rec.fed.lr_schedule, rec.train.lr, rec.fed.eval_interval = "constant", u.pga_recovery_lr, 1

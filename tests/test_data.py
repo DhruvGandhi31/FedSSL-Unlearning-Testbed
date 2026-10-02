@@ -69,3 +69,16 @@ def test_string_float_raises(tmp_path):
     p.write_text("data:\n  alpha: 3e-1\n")  # PyYAML reads this as a string
     with pytest.raises(TypeError):
         load_config(p)
+
+
+def test_forget_labeled_frac():
+    cfg = DataConfig(scenario="exclusive_class", forget_class=3, forget_share=0.2, forget_labeled_frac=1.0)
+    clients = make_clients(LABELS, cfg)
+    k0 = class_counts(clients[0].labeled, LABELS)[3]
+    assert k0 == round(0.2 * 500)  # all of client 0's class-k images are labeled
+    assert class_counts(clients[0].unlabeled, LABELS)[3] == 0
+    assert all(class_counts(c.labeled, LABELS)[3] == 0 for c in clients[1:])
+    # other classes and other clients are untouched by the override
+    base = make_clients(LABELS, DataConfig(scenario="exclusive_class", forget_class=3, forget_share=0.2))
+    for a, b in zip(clients[1:], base[1:]):
+        assert np.array_equal(a.labeled, b.labeled) and np.array_equal(a.unlabeled, b.unlabeled)
