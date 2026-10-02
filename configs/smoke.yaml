@@ -1,0 +1,14 @@
+# Catches shape/device/IO bugs; numbers are meaningless. Must finish in < 5 min.
+name: smoke
+seed: 0
+data:
+  num_clients: 3
+  subset: 3000
+  min_client_size: 50
+  scenario: exclusive_class
+train:
+  local_steps: 10
+fed:
+  rounds: 5
+  history_interval: 2
+  eval_interval: 1

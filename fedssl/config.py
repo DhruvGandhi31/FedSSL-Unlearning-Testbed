@@ -39,11 +39,22 @@ class TrainConfig:
 
 
 @dataclass
+class FedConfig:
+    rounds: int = 200
+    participation: float = 0.5  # fraction of clients sampled per round
+    lr_schedule: str = "cosine"  # "cosine" (FixMatch's 7/16-period cosine over rounds) | "constant"
+    history_interval: int = 5    # store every participant's update every this many rounds (FedEraser)
+    eval_interval: int = 5
+
+
+@dataclass
 class Config:
     name: str = "unnamed"
     seed: int = 0
+    out_dir: str = "results"
     data: DataConfig = field(default_factory=DataConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+    fed: FedConfig = field(default_factory=FedConfig)
 
 
 def _build(cls: type, raw: dict, where: str):
