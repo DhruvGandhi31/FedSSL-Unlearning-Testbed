@@ -3,24 +3,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import time
 from pathlib import Path
 
-import numpy as np
 import torch
 
 from fedssl.config import load_config, save_config
-from fedssl.data import class_counts, load_cifar10, make_clients, to_device
+from fedssl.data import class_counts, load_data
 from fedssl.metrics import MetricsWriter, git_commit
 from fedssl.models import WideResNet
-from fedssl.server import fedavg, make_schedule
-
-
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+from fedssl.server import fedavg, make_schedule, seed_everything
 
 
 def main() -> None:
@@ -40,10 +32,8 @@ def main() -> None:
     run_dir.mkdir(parents=True)
     save_config(cfg, run_dir / "config.yaml")
 
-    arrays = load_cifar10(cfg.data.root)
-    y_train = arrays[1]
-    clients = make_clients(y_train, cfg.data)
-    data = to_device(*arrays, device)
+    data, clients = load_data(cfg.data, device)
+    y_train = data.y_train.cpu().numpy()
     partition = [{"cid": c.cid, "labeled": class_counts(c.labeled, y_train).tolist(),
                   "unlabeled": class_counts(c.unlabeled, y_train).tolist()} for c in clients]
     (run_dir / "partition.json").write_text(json.dumps(partition))

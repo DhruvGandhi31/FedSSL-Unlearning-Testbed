@@ -108,6 +108,11 @@ def make_clients(labels: np.ndarray, cfg: DataConfig) -> list[ClientData]:
     raise ValueError(f"unknown scenario {cfg.scenario!r}")
 
 
+def load_data(cfg: DataConfig, device: torch.device) -> tuple[DeviceData, list[ClientData]]:
+    arrays = load_cifar10(cfg.root)
+    return to_device(*arrays, device), make_clients(arrays[1], cfg)
+
+
 def class_counts(idx: np.ndarray, labels: np.ndarray) -> np.ndarray:
     return np.bincount(labels[idx], minlength=NUM_CLASSES)
 

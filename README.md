@@ -15,8 +15,8 @@ The target output is one figure: how far each unlearning method's forget metric 
 | 1. Foundations | config, CIFAR-10 partitioning, WRN-28-2 | done |
 | 2. Local learner | GPU augmentations, FixMatch loss, `local_train` | done |
 | 3. Federation | FedAvg server, sampling schedule, update history, `run.py` | done |
-| 4. Unlearning | retrain, FedEraser, projected gradient ascent | next |
-| 5. Experiments | SSL vs. supervised configs, main figure | planned |
+| 4. Unlearning | retrain, FedEraser, projected gradient ascent | built; first full-run results pending |
+| 5. Experiments | SSL vs. supervised configs, main figure | configs written |
 
 ## Setup
 
@@ -34,6 +34,7 @@ CIFAR-10 downloads to `data/` on first use (~170 MB).
 python run.py --config configs/smoke.yaml          # end-to-end check, < 1 min; run after any change to fedssl/
 python run.py --config configs/X.yaml --seed 1     # --seed overrides the training seed
 python -m fedssl.data --config X.yaml              # print the per-client class split
+python unlearn.py --run results/<name>/<run> --method retrain|federaser|pga [--labeler L]
 python -m pytest tests/ -q
 ```
 
@@ -49,6 +50,10 @@ Each run writes to `results/<name>/s<seed>-<timestamp>/`:
 | `history/rXXXX_cYY.pt` | fp16 client updates every `history_interval` rounds (for FedEraser) |
 | `last_updates.pt` | each client's most recent update (for PGA's reference model) |
 
+Unlearning results go to `<run>/unlearn/<method>-<labeler>-<timestamp>/` with their own `metrics.jsonl` and `final.pt`.
+`--labeler` chooses who pseudo-labels during FedEraser calibration and PGA recovery rounds:
+`current` (the model being unlearned), `original` (the run's contaminated final model), `none`, or a path to a state dict such as a retrain's `final.pt`.
+
 ## Layout
 
 ```
@@ -60,8 +65,13 @@ fedssl/
   client.py   # local_train(global_weights, client, cfg, pseudo_labeler, ...) -> update, stats
   server.py   # FedAvg loop, sampling schedule, update history
   metrics.py  # test / per-class accuracy, pseudo-label scan, metrics.jsonl writer
+  unlearn/
+    retrain.py    # same init, seed and schedule, forget client removed
+    federaser.py  # rebuild from stored updates with calibration training
+    pga.py        # projected gradient ascent + recovery rounds
 configs/      # one YAML per experiment, plus smoke.yaml
-run.py
+run.py        # train a federated run
+unlearn.py    # unlearn client 0 from a finished run
 tests/
 ```
 
@@ -72,6 +82,12 @@ tests/
 - **Federation:** FedAvg with equal client weights, since every client runs the same number of local steps. 50% of clients take part each round. The learning rate follows FixMatch's cosine schedule over rounds.
 - **Supervised control:** the same config with `lambda_u: 0`.
 - **Forget scenario (exclusive class):** client 0 is the forgotten client. It gets 20% of class *k*'s images and holds *all* the labeled class-*k* examples (100 by default). The rest of class *k* goes to clients 1–9 as unlabeled data only. Any confident class-*k* pseudo-label on those clients is knowledge that came from client 0. The forget metric is test accuracy on class *k*, which should be about 0 after retraining without client 0.
+
+## Unlearning methods
+
+- **retrain:** FedAvg from the run's `init.pt` with the same seed, on the saved schedule with client 0 removed from every round. This is the reference the other methods are measured against.
+- **FedEraser** (Liu et al. 2021): rebuilds the model from init, one stored round at a time. At the first stored round, the remaining clients' stored updates are applied unchanged. At each later one, those clients run calibration training for half the usual local steps, starting from the model rebuilt so far. Each new update keeps its own direction but is rescaled, per tensor, to the size of the stored update.
+- **PGA** (Halimi et al. 2022): the reference model is the final model with client 0's share of its last FedAvg round removed. This is approximate, because client 0's last local model is taken to be `final + last_update`. Gradient ascent on client 0's labeled data follows, kept inside an L2 ball around the reference. The radius is ⅓ of the mean distance from the reference to random-init models. Ascent stops early once client 0's accuracy reaches chance. A few recovery FedAvg rounds without client 0 come last.
 
 ## Design notes
 

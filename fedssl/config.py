@@ -48,6 +48,18 @@ class FedConfig:
 
 
 @dataclass
+class UnlearnConfig:
+    forget_client: int = 0
+    federaser_calib_ratio: float = 0.5  # calibration local steps = ratio * train.local_steps
+    pga_lr: float = 0.01
+    pga_steps: int = 200                # max ascent steps
+    pga_stop_acc: float = 0.1           # stop once accuracy on the forget client's labeled data <= this
+    pga_radius_frac: float = 0.33       # L2 ball radius = frac * mean distance(reference, random inits)
+    pga_recovery_rounds: int = 5        # FedAvg rounds without the forget client after ascent
+    pga_recovery_lr: float = 0.01
+
+
+@dataclass
 class Config:
     name: str = "unnamed"
     seed: int = 0
@@ -55,6 +67,7 @@ class Config:
     data: DataConfig = field(default_factory=DataConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     fed: FedConfig = field(default_factory=FedConfig)
+    unlearn: UnlearnConfig = field(default_factory=UnlearnConfig)
 
 
 def _build(cls: type, raw: dict, where: str):
@@ -80,11 +93,11 @@ def _build(cls: type, raw: dict, where: str):
 
 
 def load_config(path: str | Path) -> Config:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     return _build(Config, raw, "config")
 
 
 def save_config(cfg: Config, path: str | Path) -> None:
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(dataclasses.asdict(cfg), f, sort_keys=False)

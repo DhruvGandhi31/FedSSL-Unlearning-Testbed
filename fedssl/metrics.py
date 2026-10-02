@@ -25,6 +25,11 @@ def evaluate(model: nn.Module, data: DeviceData) -> dict:
     return {"test_acc": correct.mean().item(), "class_acc": per_class.tolist()}
 
 
+def accuracy_on(model: nn.Module, data: DeviceData, idx: torch.Tensor) -> float:
+    """Accuracy on train-set indices (e.g. the forget client's labeled data)."""
+    return (_predict(model, data.x_train[idx]).argmax(1) == data.y_train[idx]).float().mean().item()
+
+
 def pseudo_label_scan(model: nn.Module, data: DeviceData, clients: list[ClientData], threshold: float) -> list[dict]:
     """Labels every client's full unlabeled pool (no augmentation). Per client: confident
     pseudo-labels per predicted class and how many match the hidden true label."""

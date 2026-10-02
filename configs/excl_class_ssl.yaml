@@ -1,0 +1,19 @@
+# Exclusive-class scenario. excl_class_ssl.yaml and excl_class_sup.yaml must differ ONLY in lambda_u.
+name: excl_class_ssl
+seed: 0
+data:
+  num_clients: 10
+  alpha: 0.3
+  labeled_frac: 0.1
+  data_seed: 0
+  scenario: exclusive_class
+  forget_class: 0
+  forget_share: 0.2
+train:
+  local_steps: 50
+  lambda_u: 1.0
+fed:
+  rounds: 200
+  participation: 0.5
+  history_interval: 5
+  eval_interval: 5

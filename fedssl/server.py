@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import math
+import random
 import time
 from pathlib import Path
 
@@ -14,6 +15,15 @@ from fedssl.client import local_train
 from fedssl.config import Config
 from fedssl.data import ClientData, DeviceData
 from fedssl.metrics import MetricsWriter, evaluate, pseudo_label_scan
+
+
+GLOBAL = "global"  # pseudo-labeler = the current global model, refreshed every round
+
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 def make_schedule(num_clients: int, rounds: int, participation: float, seed: int) -> list[list[int]]:
@@ -49,26 +59,31 @@ def save_update(path: Path, update: dict[str, torch.Tensor]) -> None:
 
 
 def fedavg(cfg: Config, data: DeviceData, clients: list[ClientData], schedule: list[list[int]],
-           model: nn.Module, run_dir: Path, log: MetricsWriter) -> dict[str, torch.Tensor]:
+           model: nn.Module, run_dir: Path, log: MetricsWriter, labeler: nn.Module | None | str = GLOBAL,
+           save_history: bool = True) -> dict[str, torch.Tensor]:
     """Runs len(schedule) rounds from model's current weights. Writes one metrics line per round,
-    fp16 client updates to run_dir/history every history_interval rounds, final.pt at the end."""
+    fp16 client updates to run_dir/history every history_interval rounds, final.pt at the end.
+    labeler: GLOBAL, a fixed frozen model, or None (no pseudo-labels)."""
     history = run_dir / "history"
-    history.mkdir(exist_ok=True)
+    if save_history:
+        history.mkdir(exist_ok=True)
     weights = copy.deepcopy(model.state_dict())
-    labeler = copy.deepcopy(model)  # default pseudo-labeler: the current global model
+    global_copy = copy.deepcopy(model)
     last_update: dict[int, dict[str, torch.Tensor]] = {}
 
     for r, participants in enumerate(schedule):
         t0 = time.time()
         lr = round_lr(cfg, r)
-        labeler.load_state_dict(weights)
+        if labeler == GLOBAL:
+            global_copy.load_state_dict(weights)
+        pl = global_copy if labeler == GLOBAL else labeler
         updates, stats = [], []
         for cid in participants:
-            u, s = local_train(weights, clients[cid], cfg.train, labeler, model=model, data=data, lr=lr)
+            u, s = local_train(weights, clients[cid], cfg.train, pl, model=model, data=data, lr=lr)
             updates.append(u)
             stats.append(s)
             last_update[cid] = u
-            if r % cfg.fed.history_interval == 0:
+            if save_history and r % cfg.fed.history_interval == 0:
                 save_update(history / f"r{r:04d}_c{cid:02d}.pt", u)
         if updates:
             weights = apply_update(weights, updates)
