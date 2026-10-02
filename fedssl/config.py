@@ -24,10 +24,26 @@ class DataConfig:
 
 
 @dataclass
+class TrainConfig:
+    local_steps: int = 50      # fixed per round, regardless of client data size
+    batch_size: int = 64       # labeled batch; unlabeled batch is mu * batch_size
+    mu: int = 3
+    lambda_u: float = 1.0      # 0 = supervised control
+    threshold: float = 0.95    # FixMatch confidence threshold tau
+    lr: float = 0.03
+    momentum: float = 0.9
+    weight_decay: float = 5e-4
+    nesterov: bool = True
+    bn_momentum: float = 0.1   # FixMatch uses 0.001 (with an EMA model); stale stats make the eval-mode labeler confidently wrong
+    amp: bool = True
+
+
+@dataclass
 class Config:
     name: str = "unnamed"
     seed: int = 0
     data: DataConfig = field(default_factory=DataConfig)
+    train: TrainConfig = field(default_factory=TrainConfig)
 
 
 def _build(cls: type, raw: dict, where: str):

@@ -5,6 +5,7 @@ import argparse
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 import torchvision
 
 from fedssl.config import Config, DataConfig, load_config
@@ -17,6 +18,22 @@ class ClientData:
     cid: int
     labeled: np.ndarray    # indices into the train set
     unlabeled: np.ndarray  # indices; their true labels are for analysis only, never training
+
+
+@dataclass
+class DeviceData:
+    """Whole dataset resident on the training device; uint8 NCHW images."""
+    x_train: torch.Tensor
+    y_train: torch.Tensor  # for unlabeled indices: analysis/logging only, never a training target
+    x_test: torch.Tensor
+    y_test: torch.Tensor
+
+
+def to_device(x_train: np.ndarray, y_train: np.ndarray, x_test: np.ndarray, y_test: np.ndarray,
+              device: torch.device) -> DeviceData:
+    img = lambda x: torch.from_numpy(x).permute(0, 3, 1, 2).contiguous().to(device)
+    return DeviceData(img(x_train), torch.from_numpy(y_train).to(device),
+                      img(x_test), torch.from_numpy(y_test).to(device))
 
 
 def load_cifar10(root: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

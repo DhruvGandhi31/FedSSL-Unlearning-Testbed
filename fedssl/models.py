@@ -32,7 +32,7 @@ class Block(nn.Module):
 class WideResNet(nn.Module):
     """Takes float images in [0, 1], NCHW; normalization happens inside."""
 
-    def __init__(self, num_classes: int = 10, depth: int = 28, widen: int = 2, bn_momentum: float = 0.001):
+    def __init__(self, num_classes: int = 10, depth: int = 28, widen: int = 2, bn_momentum: float = 0.1):
         super().__init__()
         n = (depth - 4) // 6
         ch = [16, 16 * widen, 32 * widen, 64 * widen]
@@ -56,9 +56,9 @@ class WideResNet(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.zeros_(m.bias)
+        # zero logits at init: an untrained pseudo-labeler is uniform, never confidently wrong
+        nn.init.zeros_(self.fc.weight)
+        nn.init.zeros_(self.fc.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.blocks(self.conv((x - self.mean) / self.std))
