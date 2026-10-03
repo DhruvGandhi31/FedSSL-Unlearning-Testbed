@@ -91,6 +91,25 @@ tests/
 - **FedEraser** (Liu et al. 2021): rebuilds the model from init, one stored round at a time. At the first stored round, the remaining clients' stored updates are applied unchanged. At each later one, those clients run calibration training for half the usual local steps, starting from the model rebuilt so far. Each new update keeps its own direction but is rescaled, per tensor, to the size of the stored update. Only learnable parameters are rebuilt this way. After each step, the BatchNorm running statistics are reset and re-estimated with a forward pass over 5,000 images from that step's remaining clients. Rescaled statistic deltas don't follow the new weights; see the results below for what happened without this.
 - **PGA** (Halimi et al. 2022): the reference model is the final model with client 0's share of its last FedAvg round removed. This is approximate, because client 0's last local model is taken to be `final + last_update`. Gradient ascent on client 0's labeled data follows (lr 1e-4), kept inside an L2 ball around the reference. The radius is ⅓ of the mean distance from the reference to random-init models. Ascent stops once client 0's accuracy is no higher than the *reference model's* test accuracy reweighted to client 0's class mix (`pga_stop: matched`). That is, the model should do no better on client 0's data than on unseen data with the same classes. The target is fixed at the reference: computed from the current model, it falls as ascent damages the model. A few recovery FedAvg rounds without client 0 come last.
 
+## Final experiment
+
+```
+python run_final.py --seeds 0 1 2 --workers 3     # resumable: rerun the same command after any interruption
+python -m analysis.main_figure                    # figure + tables from whatever has finished so far
+```
+
+- **What runs:** for each seed and for both arms (`configs/excl_class_ssl.yaml`, `configs/excl_class_sup.yaml`, 90% scenario):
+  - the original 200-round run
+  - retrain
+  - FedEraser and PGA. The SSL arm runs each with `--labeler current` and `--labeler original`. The supervised arm runs only `current`, because with `lambda_u: 0` the labeler only affects logging.
+- **Parallel:** three chains run at once on the one GPU, because a single run leaves it 60–70% idle (Python launch-bound). This uses about 1 GB of VRAM per run.
+- **Resumable:** any step whose `final.pt` exists is skipped.
+- **Stays awake:** the script asks Windows to keep the machine awake until it exits. Closing the laptop lid can still suspend it.
+- **Logs:** `results/final_logs/` has `progress.log`, one log per step, and the `git diff` at launch.
+- **Outputs:** `analysis/main_figure.py` writes `results/figures/main_figure.{png,pdf}`, `main_table.md` and `main_table.csv`.
+  - The **forget metric** is the forget-class test accuracy of each final model minus that of the same seed's retrain, as mean ± std over seeds.
+  - The **propagation metric** is the number of confident class-0 pseudo-labels on clients 1–9 under the final model.
+
 ## Results
 
 Single seed (0) so far, not yet mean ± std over 3 seeds. To regenerate the tables: `python -m analysis.summarize results/excl_class_ssl/<run> --diagnose`.
