@@ -71,14 +71,12 @@ def test_string_float_raises(tmp_path):
         load_config(p)
 
 
-def test_forget_labeled_frac():
-    cfg = DataConfig(scenario="exclusive_class", forget_class=3, forget_share=0.2, forget_labeled_frac=1.0)
+def test_forget_label_share():
+    cfg = DataConfig(scenario="exclusive_class", forget_class=3, forget_share=0.2, forget_label_share=0.9)
     clients = make_clients(LABELS, cfg)
-    k0 = class_counts(clients[0].labeled, LABELS)[3]
-    assert k0 == round(0.2 * 500)  # all of client 0's class-k images are labeled
-    assert class_counts(clients[0].unlabeled, LABELS)[3] == 0
-    assert all(class_counts(c.labeled, LABELS)[3] == 0 for c in clients[1:])
-    # other classes and other clients are untouched by the override
-    base = make_clients(LABELS, DataConfig(scenario="exclusive_class", forget_class=3, forget_share=0.2))
-    for a, b in zip(clients[1:], base[1:]):
-        assert np.array_equal(a.labeled, b.labeled) and np.array_equal(a.unlabeled, b.unlabeled)
+    budget = round(cfg.labeled_frac * 500)  # class k keeps the usual label budget
+    on0 = class_counts(clients[0].labeled, LABELS)[3]
+    elsewhere = sum(class_counts(c.labeled, LABELS)[3] for c in clients[1:])
+    assert on0 == round(0.9 * budget) and on0 + elsewhere == budget
+    idx = _all_indices(clients)
+    assert np.array_equal(np.sort(idx), np.arange(len(LABELS)))

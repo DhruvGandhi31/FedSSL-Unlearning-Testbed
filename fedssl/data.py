@@ -64,14 +64,13 @@ def dirichlet_partition(idx: np.ndarray, labels: np.ndarray, n: int, alpha: floa
     raise RuntimeError(f"no Dirichlet draw gave every client >= {min_size} examples; lower min_client_size")
 
 
-def split_labeled(idx: np.ndarray, labels: np.ndarray, frac: float, rng: np.random.Generator,
-                  class_frac: dict[int, float] | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """Stratified by class: keeps round(frac * n_c) of each class labeled (class_frac overrides per class)."""
+def split_labeled(idx: np.ndarray, labels: np.ndarray, frac: float,
+                  rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Stratified by class: keeps round(frac * n_c) of each class labeled."""
     lab = [np.empty(0, dtype=np.int64)]
     for c in np.unique(labels[idx]):
         ci = rng.permutation(idx[labels[idx] == c])
-        f = (class_frac or {}).get(int(c), frac)
-        lab.append(ci[: int(round(f * len(ci)))])
+        lab.append(ci[: int(round(frac * len(ci)))])
     labeled = np.sort(np.concatenate(lab))
     return labeled, np.setdiff1d(idx, labeled)
 
@@ -88,23 +87,36 @@ def make_clients(labels: np.ndarray, cfg: DataConfig) -> list[ClientData]:
         return [ClientData(i, *split_labeled(p, labels, cfg.labeled_frac, rng)) for i, p in enumerate(parts)]
 
     if cfg.scenario == "exclusive_class":
-        # Client 0 gets forget_share of class k, forget_labeled_frac of it labeled.
-        # The rest of class k is spread over clients 1..N-1 as unlabeled data only.
+        # Client 0 gets forget_share of class k; the rest is spread over clients 1..N-1.
+        # forget_label_share < 0: only client 0 has class-k labels (labeled_frac of its share).
+        # Otherwise class k keeps the usual label budget (labeled_frac of all class-k images),
+        # client 0 holds forget_label_share of it, the rest is drawn from other clients' class-k images.
         k = cfg.forget_class
-        k_frac = cfg.labeled_frac if cfg.forget_labeled_frac < 0 else cfg.forget_labeled_frac
         is_k = labels[pool] == k
         k_idx = rng.permutation(pool[is_k])
         n0 = int(round(cfg.forget_share * len(k_idx)))
         parts = dirichlet_partition(pool[~is_k], labels, cfg.num_clients, cfg.alpha, cfg.min_client_size, rng)
         k_rest = _dirichlet_split(k_idx[n0:], cfg.num_clients - 1, cfg.alpha, rng)
+        if cfg.forget_label_share >= 0:
+            budget = int(round(cfg.labeled_frac * len(k_idx)))
+            n_lab0 = int(round(cfg.forget_label_share * budget))
+            if n_lab0 > n0:
+                raise ValueError(f"client 0 needs {n_lab0} class-{k} labels but holds only {n0} class-{k} images")
+            k_lab = np.concatenate([k_idx[:n_lab0], rng.choice(k_idx[n0:], budget - n_lab0, replace=False)])
         clients = []
         for i, p in enumerate(parts):
-            if i == 0:
-                lab, unl = split_labeled(np.concatenate([p, k_idx[:n0]]), labels, cfg.labeled_frac, rng,
-                                         class_frac={k: k_frac})
+            k_part = k_idx[:n0] if i == 0 else k_rest[i - 1]
+            if cfg.forget_label_share < 0:
+                if i == 0:
+                    lab, unl = split_labeled(np.concatenate([p, k_part]), labels, cfg.labeled_frac, rng)
+                else:
+                    lab, unl = split_labeled(p, labels, cfg.labeled_frac, rng)
+                    unl = np.sort(np.concatenate([unl, k_part]))
             else:
                 lab, unl = split_labeled(p, labels, cfg.labeled_frac, rng)
-                unl = np.sort(np.concatenate([unl, k_rest[i - 1]]))
+                is_lab = np.isin(k_part, k_lab)
+                lab = np.concatenate([lab, k_part[is_lab]])
+                unl = np.sort(np.concatenate([unl, k_part[~is_lab]]))
             clients.append(ClientData(i, np.sort(lab), unl))
         return clients
 

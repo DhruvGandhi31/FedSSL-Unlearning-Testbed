@@ -83,6 +83,7 @@ tests/
 - **Federation:** FedAvg with equal client weights, since every client runs the same number of local steps. 50% of clients take part each round. The learning rate follows FixMatch's cosine schedule over rounds.
 - **Supervised control:** the same config with `lambda_u: 0`.
 - **Forget scenario (exclusive class):** client 0 is the forgotten client. It gets 20% of class *k*'s images and holds *all* the labeled class-*k* examples (100 by default). The rest of class *k* goes to clients 1–9 as unlabeled data only. Any confident class-*k* pseudo-label on those clients is knowledge that came from client 0. The forget metric is test accuracy on class *k*, which should be about 0 after retraining without client 0.
+  - **Relaxed variant (`forget_label_share`).** Class *k* keeps the usual label budget (`labeled_frac` of all its images, 500 by default). Client 0 holds `forget_label_share` of those labels; the rest are drawn at random from the other clients' class-*k* images. At 0.9, client 0 has 450 class-*k* labels and clients 1–9 share 50. Retrain then learns some class *k* from those 50. The forget metric becomes the gap to retrain, and propagation shows up as class-*k* pseudo-labels on clients 1–9 beyond what retrain produces. The default (−1) is the strict version above, and its partition is byte-identical to earlier runs.
 
 ## Unlearning methods
 
@@ -127,20 +128,63 @@ With the defaults, client 0 holds the only 100 labeled class-0 images. Under tha
 
 - **With 10 local steps, class 0 is nonzero only at evaluations where client 0 took part in that same round.** One round without client 0 takes it back to 0, in both SSL and supervised runs. Zero confident class-0 pseudo-labels ever appear on clients 1–9.
 - **So the global model never keeps class-0 knowledge.** It reflects only client 0's most recent update.
+- **Relaxed exclusivity, `forget_label_share: 0.9`** (450 class-0 labels on client 0, 50 on clients 1–9; `local_steps` 50; 30 rounds, evaluated every round; a retrain probe for each):
+
+  | class-0 acc | SSL original | SSL retrain | sup original | sup retrain |
+  |---|---|---|---|---|
+  | rounds where client 0 took part | **0.486** | 0.027 | **0.225** | 0.005 |
+  | rounds where it didn't | 0.044 | 0.058 | 0.023 | 0.031 |
+  | mean of last 10 rounds | 0.226 | 0.090 | 0.092 | 0.045 |
+
+  - Class 0 is now learned whenever client 0 takes part, and retrain learns a little from the 50 labels elsewhere (up to 0.34 in single rounds).
+  - **But client 0's extra knowledge is gone within a round or two of its absence.** In rounds without client 0, the original is no better than retrain, in both SSL and supervised.
+  - **No confident class-0 pseudo-labels appear in any of the four runs.** At 30 rounds the model (test accuracy about 0.40) is never 95% confident on class 0.
+  - SSL roughly doubles class-0 accuracy in client-0 rounds (0.49 vs 0.23), so unlabeled data does amplify client 0's contribution while it is present.
+  - Probe runs are in `results/scenario_probe_{ssl,sup}_share90/`.
 - **Fewer local steps reduce drift enough for class 0 to show up, but not enough for it to persist.** And since one FedAvg round without client 0 erases it, any unlearning method that runs even one such round would "forget" it trivially.
 
 - **Not a bias problem.** On the original final model, class 0's output bias is normal (−0.05 vs −0.13…0.31 for the others). Its output-weight norm is the smallest (1.78 vs 2.1–2.7).
 - **Class 0 isn't recognized at all.** On class-0 test images, class 0's score sits at a near-random position among the 10 classes and is never top. Adding to the bias doesn't recover it: +4 gives 0.29, and +8 predicts class 0 for almost everything.
 - **So the averaged model never represents class 0.** Client 0's 50 local steps learn it, but averaging with four clients that drift away from it erases it every round.
 
-**Consequence:** with the current scenario, every method's class-0 gap against retrain will be about 0 for trivial reasons. The scenario needs changing before the main figure means anything. Options, not yet decided:
+**Consequence for the strict scenario:** every method's class-0 gap against retrain is about 0 for trivial reasons. **Resolved** by the relaxed scenario (`forget_label_share: 0.9`, now the default in `configs/excl_class_{ssl,sup}.yaml`); see its full run below. The scenario needs changing before the main figure means anything. Options, not yet decided:
 
 1. Give client 0 more class-0 signal: raise `forget_share` and/or label more of client 0's class-0 images.
 2. Weight FedAvg by labeled-data size or by class coverage, rather than equally.
 3. Lower τ, or warm up λ_u, so early wrong pseudo-labels don't lock class 0 out.
 4. Run `configs/excl_class_sup.yaml` first, to see whether class 0 survives without SSL.
 
-### Unlearning on this run
+### Relaxed scenario, full run: `configs/excl_class_ssl.yaml` with `forget_label_share: 0.9`
+
+Run `results/excl_class90_ssl/s0-20261003-095723`, seed 0, 200 rounds, 120.8 min. The metrics header records the pre-change commit, because the scenario code was uncommitted at launch. The exact code is in `results/excl_class90_ssl/uncommitted-at-launch.diff`.
+
+| metric | value |
+|---|---|
+| final test accuracy | 0.655 |
+| **final class-0 accuracy** | **0.563** (client 0 was *not* in the final round) |
+| confident class-0 pseudo-labels on clients 1–9 (final) | **757, of which 744 correct** |
+| peak | class 0 at 0.780 and 1,840 class-0 pseudo-labels at round 189 |
+| per-class test accuracy, classes 0–9 | 0.56, 0.97, 0.79, 0.45, 0.65, 0.16, 0.84, 0.66, 0.87, 0.60 |
+
+Class-0 accuracy at every 25th round: r24 0.285, r49 0.412, r74 0.624, r99 0.144, r124 0.070, r149 0.289, r174 0.560, r199 0.563.
+
+- **Class 0 is learned and kept.** Over the last 50 rounds, class-0 accuracy averages 0.485 and never drops below 0.143. Rounds 144–169 had no client 0 at any eval. Class 0 held at 0.14–0.30 there, and clients 1–9 kept producing 15–102 correct confident class-0 pseudo-labels. This is the persistence every earlier attempt lacked.
+- **Propagation shows up from mid-training.** The first confident class-0 pseudo-labels on clients 1–9 appear at round 74 (43, of which 42 correct). From round 129 on they are in the hundreds, at 91–98% precision. The 30-round probes never got this far.
+- **Client 0's presence still matters.** Eval rounds that included client 0 average 0.572 class-0 accuracy; rounds without it average 0.170.
+**Retrain** (`unlearn/retrain-20261003-115835`, 111.6 min) answers how much of this class-0 knowledge comes from client 0:
+
+| | test acc | class-0 acc, final | class-0 acc, mean of rounds 150–199 | confident class-0 PLs on clients 1–9, final / mean of rounds 150–199 |
+|---|---|---|---|---|
+| original | 0.655 | **0.563** | **0.485** | 757 (744 correct) / 615 |
+| retrain | 0.596 | 0.367 | 0.138 | 535 (518 correct) / 157 |
+| **gap (original − retrain)** | | **+0.196** | **+0.347** | |
+
+- **The forget metric is now meaningful.** Retrain learns some class 0 from the 50 labels on other clients. The original knows substantially more, and over the last 50 rounds it pseudo-labels about 4× as many class-0 images on other clients.
+- **Class-0 accuracy at every 25th round, original / retrain:** r24 0.285 / 0.001, r49 0.412 / 0.090, r74 0.624 / 0.214, r99 0.144 / 0.007, r124 0.070 / 0.022, r149 0.289 / 0.122, r174 0.560 / 0.110, r199 0.563 / 0.367.
+- **Final-round snapshots are noisy.** Retrain's final 0.367 is also its single best eval, so the final-round gap (0.196) understates the late-training gap (0.347). Averaging over the last few eval rounds is the steadier metric. This applies to unlearning results too.
+- **Still single-seed.** The 3-seed mean ± std, the supervised arm and the unlearning methods (FedEraser, PGA) on this run are next.
+
+### Unlearning on the strict-scenario run
 
 | model | test acc | class-0 acc | class-0 gap vs retrain | confident class-0 PLs on clients 1–9 |
 |---|---|---|---|---|

@@ -21,7 +21,8 @@ class DataConfig:
     scenario: str = "exclusive_class"  # "none" | "exclusive_class"
     forget_class: int = 0              # class k for exclusive_class
     forget_share: float = 0.2          # fraction of class-k train images given to client 0
-    forget_labeled_frac: float = -1.0  # fraction of client 0's class-k images labeled; <0 = labeled_frac
+    forget_label_share: float = -1.0   # share of class-k labels held by client 0 (class k keeps the usual
+                                       # label budget); <0: only client 0 has class-k labels
 
 
 @dataclass

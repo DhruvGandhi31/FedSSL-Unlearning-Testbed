@@ -1,5 +1,5 @@
-# Exclusive-class scenario. excl_class_ssl.yaml and excl_class_sup.yaml must differ ONLY in lambda_u.
-name: excl_class_ssl
+# Exclusive-class scenario, relaxed: client 0 holds 90% of class-0 labels. ssl and sup must differ ONLY in lambda_u.
+name: excl_class90_ssl
 seed: 0
 data:
   num_clients: 10
@@ -9,6 +9,7 @@ data:
   scenario: exclusive_class
   forget_class: 0
   forget_share: 0.2
+  forget_label_share: 0.9
 train:
   local_steps: 50
   lambda_u: 1.0
